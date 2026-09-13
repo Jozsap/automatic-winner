@@ -1,0 +1,75 @@
+name: V9 Frozen Validation
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-v9:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    env:
+      EDGAR_UA: "Jozsap V9 research 35482421+Jozsap@users.noreply.github.com"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    steps:
+      - name: Checkout validation repository
+        uses: actions/checkout@v4
+
+      - name: Checkout point-in-time fundamentals engine
+        uses: actions/checkout@v4
+        with:
+          repository: whitenoise1/RFundamentals
+          path: RFundamentals
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::data.table
+            any::arrow
+            any::jsonlite
+            any::httr
+            any::quantmod
+            any::xts
+            any::zoo
+          needs: check
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-v9.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-v9.txt
+
+      - name: Build point-in-time SEC and market layers
+        run: Rscript build_rf.R
+
+      - name: Run V9-1.0-FROZEN walk-forward test
+        run: python v9_frozen_backtest.py
+
+      - name: Show validation summary
+        if: always()
+        run: |
+          if [ -f v9_results/summary.json ]; then cat v9_results/summary.json; fi
+
+      - name: Upload V9 audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v9-frozen-validation-results
+          path: |
+            v9_results/**
+          if-no-files-found: warn
+          retention-days: 30
